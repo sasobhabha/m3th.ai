@@ -1,8 +1,24 @@
-# AMC-10 GPT — a from-scratch math-problem generator
+# m3th — a from-scratch math-problem generator & quiz CLI
 
 A character-level GPT trained **from scratch** (PyTorch only — no pretrained weights, no
-`transformers` library) to generate AMC 10–style problems in LaTeX. Runs on Apple silicon
-via MPS.
+`transformers` library) to generate AMC 10–style problems in LaTeX, then quiz you on them.
+Runs on Apple silicon via MPS.
+
+## Install (Homebrew)
+
+```bash
+brew install sasobhabha/m3th/m3th
+```
+
+This bundles a pretrained checkpoint (~13 MB) — no training needed.
+
+```bash
+m3th          # interactive REPL: /new generates a problem, /year /contest /number
+              # /temp /topk /tokens /seed control it, /show prints settings
+m3th quiz     # generates a problem, you answer A–E, it checks the official key,
+              # and scores the session (options: -n count, -t temp, -s subject)
+m3th --help   # everything else, incl. --ckpt to point at a different checkpoint
+```
 
 ## Dataset
 
@@ -71,8 +87,11 @@ would each improve quality.
 
 ## Files
 
-- `scraper.py` — dataset scraper (poshenloh.com → `data/problems.jsonl` + `data/corpus.txt`)
-- `model.py` — GPT implementation from scratch
+- `m3th/` — installable CLI package (`m3th` REPL, `m3th quiz`, model, and bundled data)
+- `scraper.py` — dataset scraper (poshenloh.com → `m3th/data/problems.jsonl` + `corpus.txt`)
+- `model.py` / `m3th/model.py` — GPT implementation from scratch
 - `train.py` — training loop (MPS/CUDA/CPU, resume, best-checkpoint tracking)
-- `sample.py` — generation CLI
-- `checkpoints/best.pt` — trained weights (val 1.067)
+- `sample.py` — generation script
+- `Formula/m3th.rb` — Homebrew formula (also published as `sasobhabha/m3th` tap)
+- checkpoints are served via [GitHub Releases](https://github.com/sasobhabha/m3th.ai/releases)
+  (`best.pt`, val 1.067) — not committed, to keep the repo lean
