@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>m3th — practice</title>
+<script>
+MathJax = {
+  tex: { inlineMath: [['\\(', '\\)'], ['$', '$']], displayMath: [['\\[', '\\]'], ['$$', '$$']] },
+  svg: { fontCache: 'global' }
+};
+</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: #0e1116; color: #e6e6e6;
+    font: 16px/1.6 ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  header { width: 100%; max-width: 760px; padding: 20px 24px 0;
+           display: flex; justify-content: space-between; align-items: baseline; }
+  header h1 { font-size: 20px; margin: 0; letter-spacing: 1px; }
+  header h1 span { color: #f7b32b; }
+  .score { color: #9aa4b2; font-size: 14px; }
+  .score b { color: #e6e6e6; }
+  form.reset { display: inline }
+  .reset button { background: none; border: none; color: #58627a; cursor: pointer;
+                  font-size: 12px; text-decoration: underline; padding: 0; }
+  main { width: 100%; max-width: 760px; padding: 8px 24px 48px; }
+  .card { background: #161b23; border: 1px solid #232b38; border-radius: 14px;
+          padding: 28px 32px; margin-top: 16px; }
+  .badge { display: inline-block; font-size: 12px; letter-spacing: 1px;
+           color: #f7b32b; border: 1px solid #3a3421; background: #1d1a10;
+           border-radius: 999px; padding: 3px 12px; margin-bottom: 14px; }
+  .problem { font-size: 17px; white-space: pre-wrap; }
+  .choices { margin-top: 22px; display: grid; gap: 10px; }
+  .choices button {
+    display: flex; gap: 14px; align-items: baseline; text-align: left;
+    background: #1b2230; color: #e6e6e6; border: 1px solid #2b3547;
+    border-radius: 10px; padding: 12px 18px; font-size: 16px; cursor: pointer;
+    font-family: inherit; line-height: 1.5; transition: border-color .15s, background .15s;
+  }
+  .choices button:hover:not(:disabled) { border-color: #f7b32b; background: #222b3c; }
+  .choices button:disabled { cursor: default; }
+  .choices button.yours   { border-color: #e5484d; background: #2a1518; }
+  .choices button.correct { border-color: #46a758; background: #14261a; }
+  .choices .key { font-weight: 700; color: #f7b32b; min-width: 22px; }
+  .banner { margin-top: 20px; padding: 12px 18px; border-radius: 10px; font-size: 15px; }
+  .banner.ok  { background: #14261a; border: 1px solid #46a758; color: #8fe0a5; }
+  .banner.no  { background: #2a1518; border: 1px solid #e5484d; color: #f1a9ab; }
+  .controls { margin-top: 16px; display: grid; gap: 10px;
+              grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+  .controls label { font-size: 12px; color: #9aa4b2; display: block; margin-bottom: 4px; }
+  .controls input { width: 100%; background: #0e1116; color: #e6e6e6;
+                    border: 1px solid #2b3547; border-radius: 8px; padding: 8px 10px;
+                    font-size: 14px; font-family: inherit; }
+  .row { display: flex; gap: 12px; margin-top: 18px; flex-wrap: wrap; align-items: center; }
+  .btn {
+    background: #f7b32b; color: #14100a; font-weight: 700; border: none;
+    border-radius: 10px; padding: 12px 26px; font-size: 15px; cursor: pointer;
+    font-family: inherit;
+  }
+  .btn.secondary { background: #1b2230; color: #cfd8e6; border: 1px solid #2b3547; font-weight: 500; }
+  .btn:disabled { opacity: .55; cursor: wait; }
+  .footnote { margin-top: 26px; color: #58627a; font-size: 12.5px; line-height: 1.5; }
+  .raw { white-space: pre-wrap; color: #9aa4b2; font-size: 14px; }
+  .generating { color: #9aa4b2; font-size: 14px; margin-left: 8px; display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>m<span>3</span>th</h1>
+  <div class="score">
+    session: <b>{{ score.correct }}/{{ score.asked }}</b>
+    {% if score.asked %} ({{ '%.0f'|format(100 * score.correct / score.asked) }}%){% endif %}
+    &nbsp;·&nbsp;
+    <form class="reset" method="post" action="{{ url_for('reset') }}"><button>reset</button></form>
+  </div>
+</header>
+
+<main>
+  <div class="card">
+    <div class="badge">{{ p.year }} {{ p.contest }} · #{{ p.number }}</div>
+    {% if p.has_choices %}
+      <div class="problem">{{ p.body }}</div>
+      <div class="choices">
+        {% for letter, text in p.choices %}
+        <button form="answer-form" name="letter" value="{{ letter }}"
+                {% if p.answered %}disabled{% endif %}
+                class="{% if p.answered and letter == p.result.correct %}correct{% endif %}
+                       {% if p.answered and letter == p.result.yours and letter != p.result.correct %}yours{% endif %}">
+          <span class="key">{{ letter }}</span><span>{{ text }}</span>
+        </button>
+        {% endfor %}
+      </div>
+      {% if not p.answered %}
+      <form id="answer-form" method="post" action="{{ url_for('answer') }}"></form>
+      {% endif %}
+      {% if p.answered and p.result %}
+        <div class="banner {{ 'ok' if p.result.was_correct else 'no' }}">
+          {% if p.result.was_correct %}✅ correct!{% else %}❌ the answer was {{ p.result.correct }}.{% endif %}
+        </div>
+      {% endif %}
+    {% else %}
+      <div class="raw">{{ p.body }}</div>
+      <div class="banner no">the model didn't produce a full (A)–(E) choice line for this one — hit Next problem for another.</div>
+    {% endif %}
+  </div>
+
+  <form class="card" method="post" action="{{ url_for('next_problem') }}" id="next-form">
+    <div class="controls">
+      <div><label>year <span style="color:#58627a">(blank = random)</span></label>
+           <input name="year" inputmode="numeric" placeholder="random"
+                  value="{{ '' if s.year is none else s.year }}"></div>
+      <div><label>contest</label><input name="contest" placeholder="A" value="{{ s.contest or '' }}"></div>
+      <div><label>problem #</label><input name="number" inputmode="numeric" value="{{ s.number }}"></div>
+      <div><label>temperature</label><input name="temp" inputmode="decimal" value="{{ s.temp }}"></div>
+      <div style="grid-column: 1 / -1"><label>seed (optional opening words)</label>
+           <input name="subject" placeholder="e.g. A square with side length" value="{{ s.subject or '' }}"></div>
+    </div>
+    <div class="row">
+      <button class="btn" type="submit" onclick="wait(this)">Next problem →</button>
+      <span class="generating" id="generating">⚙ generating on the GPU — this takes ~10–20 s…</span>
+    </div>
+  </form>
+
+  <p class="footnote">
+    The model invents the question; the answer key is the <b>real official AMC 10 answer</b> for the
+    (year, contest, problem) slot sampled above. Prose coherence is limited by the 3M-param
+    char-level model — treat every problem with healthy suspicion.
+  </p>
+</main>
+
+<script>
+function wait(btn) {
+  btn.disabled = true;
+  document.getElementById('generating').style.display = 'inline';
+  document.getElementById('next-form').submit();
+}
+</script>
+</body>
+</html>

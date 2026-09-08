@@ -20,6 +20,23 @@ m3th quiz     # generates a problem, you answer A–E, it checks the official ke
 m3th --help   # everything else, incl. --ckpt to point at a different checkpoint
 ```
 
+## Web app (LaTeX practice UI)
+
+A Flask app in the repo root renders problems with MathJax: click A–E to answer, it grades
+against the official key, colors your pick vs. the right one, and tracks a session score.
+
+```bash
+# from the repo root (checkpoint auto-detected)
+uv sync --extra web
+uv run python app.py                 # http://127.0.0.1:8080
+
+uv run python app.py --host 0.0.0.0  # expose on your network
+uv run python app.py --port 5001     # different port
+uv run python app.py --ckpt /path/to/best.pt
+```
+
+Not part of the Homebrew formula — `brew install sasobhabha/m3th/m3th` stays a lean CLI.
+
 ## Dataset
 
 Scraped from [LIVE by Po-Shen Loh](https://live.poshenloh.com/past-contests) (MAA-licensed
@@ -87,6 +104,7 @@ would each improve quality.
 
 ## Files
 
+- `app.py` + `templates/index.html` — Flask web app (MathJax LaTeX, click-to-answer, score)
 - `m3th/` — installable CLI package (`m3th` REPL, `m3th quiz`, model, and bundled data)
 - `scraper.py` — dataset scraper (poshenloh.com → `m3th/data/problems.jsonl` + `corpus.txt`)
 - `model.py` / `m3th/model.py` — GPT implementation from scratch

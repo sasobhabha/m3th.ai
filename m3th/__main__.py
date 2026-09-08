@@ -4,6 +4,8 @@ Usage:
     m3th [--ckpt PATH]
     m3th quiz [--ckpt PATH] [-n COUNT] [-t TEMP] [-s SUBJECT]
 
+A separate Flask web app lives in the repo root: app.py (not part of the brew CLI).
+
 Commands inside the generate REPL: /new /year /contest /number /seed
 /temp /topk /tokens /show /help /quit
 """
@@ -46,8 +48,12 @@ def default_ckpt() -> Path:
     cache = Path.home() / ".cache" / "m3th" / "best.pt"
     if cache.exists():
         return cache
-    local = Path(__file__).resolve().parent.parent / "checkpoints" / "best.pt"
-    return local
+    # repo checkout / CWD fallback (dev usage)
+    for base in (Path(__file__).resolve().parent.parent, Path.cwd()):
+        local = base / "checkpoints" / "best.pt"
+        if local.exists():
+            return local
+    return Path(__file__).resolve().parent.parent / "checkpoints" / "best.pt"
 
 
 def answers() -> dict[tuple[int, str, int], str]:
