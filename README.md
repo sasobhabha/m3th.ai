@@ -14,10 +14,7 @@ Two ways to practice AMC 10–style problems:
 # from the repo root
 uv sync --extra web
 
-# one-time: train the LoRA adapter (~10 min on Apple silicon; resumable)
-uv run python3 finetune.py --epochs 3
-
-# serve on port 8080
+# serve on port 8080 — the trained adapter downloads automatically on first run
 uv run python3 app.py                       # http://127.0.0.1:8080
 
 # options
@@ -28,6 +25,12 @@ uv run python3 app.py --adapter PATH        # explicit LoRA adapter dir
 
 Then open **http://127.0.0.1:8080** — the first visit loads the model and
 generates a problem (~5–15 s on the GPU).
+
+Prefer training your own adapter instead of downloading it?
+
+```bash
+uv run python3 finetune.py --epochs 3   # ~10 min on Apple silicon, resumable
+```
 
 What you get:
 
@@ -119,4 +122,6 @@ which is exactly why the web app uses the fine-tuned LLM instead.
 - `train.py` — char-GPT training loop (MPS/CUDA/CPU, resume, best-checkpoint)
 - `sample.py` — char-GPT generation script
 - `Formula/m3th.rb` — Homebrew formula (also published as `sasobhabha/m3th` tap)
-- checkpoints/LoRA adapters are gitignored; share via GitHub Releases if needed
+- checkpoints/LoRA adapters are gitignored; the trained adapter ships via
+  [Releases](https://github.com/sasobhabha/m3th.ai/releases/download/v0.2.0/m3th-qwen-lora.zip)
+  and `app.py` downloads it automatically when missing

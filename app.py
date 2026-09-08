@@ -1,14 +1,17 @@
 """m3th web — a Flask practice app for LLM-generated AMC 10-style problems.
 
-Generation uses the LoRA fine-tuned Qwen2.5-0.5B-Instruct (finetune.py), so
-prose is coherent; answers are graded against the *official* AMC key for the
-sampled (year, contest, number) slot. LaTeX is rendered client-side by MathJax.
+Generation uses the LoRA fine-tuned Qwen2.5-0.5B-Instruct, so prose is
+coherent; answers are graded against the *official* AMC key for the sampled
+(year, contest, number) slot. LaTeX is rendered client-side by MathJax.
 
 Run from the repo root:
     uv run python3 app.py            # serves on port 8080
     python3 app.py --host 0.0.0.0    # expose on your network
     python3 app.py --port 5001       # different port
-    python3 app.py --ckpt PATH       # explicit LoRA adapter dir
+    python3 app.py --adapter PATH    # explicit LoRA adapter dir
+
+If no adapter exists, the trained one is downloaded automatically from the
+GitHub release (or train your own with finetune.py).
 """
 
 from __future__ import annotations
@@ -17,8 +20,11 @@ import argparse
 import os
 import random
 import re
+import shutil
 import threading
+import urllib.request
 import uuid
+import zipfile
 from pathlib import Path
 
 import torch
@@ -30,6 +36,9 @@ from m3th.__main__ import answers
 
 BASE_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
 DEFAULT_ADAPTER = Path("checkpoints/qwen-lora")
+ADAPTER_URL = (
+    "https://github.com/sasobhabha/m3th.ai/releases/download/v0.2.0/m3th-qwen-lora.zip"
+)
 CHOICES_RE = re.compile(r"\((?P<letter>[A-E])\)")
 # bare LaTeX in a choice (e.g. "\frac{5}{13}") needs math delimiters to render
 LATEX_RE = re.compile(r"\\[a-zA-Z]+|\^|_\d|[{]\\")
@@ -57,14 +66,29 @@ def default_adapter() -> Path:
 
 
 def find_adapter() -> Path:
-    """LoRA adapter trained by finetune.py."""
+    """LoRA adapter: trained locally, else downloaded from the release."""
     for base in (default_adapter(), Path(__file__).resolve().parent / "checkpoints" / "qwen-lora"):
         if (base / "adapter_config.json").exists():
             return base
-    raise SystemExit(
-        f"LoRA adapter not found (looked in {default_adapter()}).\n"
-        "Train it with:  uv run python3 finetune.py --epochs 3"
-    )
+    return download_adapter()
+
+
+def download_adapter() -> Path:
+    """Fetch and unpack the trained adapter from the GitHub release."""
+    dest = default_adapter()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    zpath = dest.parent / "m3th-qwen-lora.zip"
+    print(f"downloading trained LoRA adapter from the release (~35 MB)…")
+    req = urllib.request.Request(ADAPTER_URL, headers={"User-Agent": "m3th"})
+    with urllib.request.urlopen(req, timeout=300) as r, open(zpath, "wb") as f:
+        shutil.copyfileobj(r, f)
+    with zipfile.ZipFile(zpath) as z:
+        z.extractall(dest.parent)
+    zpath.unlink()
+    if not (dest / "adapter_config.json").exists():
+        raise SystemExit(f"adapter download failed: no adapter_config.json in {dest}")
+    print(f"adapter ready: {dest}")
+    return dest
 
 
 class LLM:
