@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import re
 import sys
@@ -39,9 +40,12 @@ def data_dir() -> Path:
 
 
 def default_ckpt() -> Path:
-    env = Path.home() / ".cache" / "m3th" / "best.pt"
-    if env.exists():
-        return env
+    env = os.environ.get("M3TH_CKPT")
+    if env:
+        return Path(env)
+    cache = Path.home() / ".cache" / "m3th" / "best.pt"
+    if cache.exists():
+        return cache
     local = Path(__file__).resolve().parent.parent / "checkpoints" / "best.pt"
     return local
 
