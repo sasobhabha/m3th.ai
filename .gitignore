@@ -11,3 +11,5 @@ wheels/
 
 # Model checkpoints
 checkpoints/
+.DS_Store
+nohup.out

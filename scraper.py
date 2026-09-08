@@ -27,8 +27,10 @@ for year in range(2002, 2026):
         CONTESTS += [f"{year}A", f"{year}B"]
 
 
-def n_take(year: int) -> int:
+def n_take(year: int, all_problems: bool = False) -> int:
     """How many trailing problems to keep for a given contest year."""
+    if all_problems:
+        return 25
     if year < 2010:
         return 5
     if year < 2020:
@@ -88,12 +90,19 @@ def format_problem(year: int, season: str, num: int, text: str, choices: dict[st
 
 
 def main() -> None:
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--all", action="store_true",
+                    help="scrape ALL 25 problems per contest (for LLM fine-tuning) "
+                         "instead of the 5/10/15 slicing rules")
+    args = ap.parse_args()
+
     out = Path("m3th/data")
     out.mkdir(exist_ok=True)
     records = []
     for slug in CONTESTS:
         year = year_of(slug)
-        take = n_take(year)
+        take = n_take(year, all_problems=args.all)
         try:
             html = fetch(slug)
         except Exception as e:
