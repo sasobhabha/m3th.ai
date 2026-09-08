@@ -4,7 +4,7 @@ import argparse
 
 import torch
 
-from model import GPT
+from m3th.model import GPT
 
 END = "<END>"
 

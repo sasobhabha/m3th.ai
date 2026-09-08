@@ -1,9 +1,23 @@
 [project]
-name = "amcgpt"
+name = "m3th"
 version = "0.1.0"
-description = "Add your description here"
+description = "AMC 10-style problem generator and quiz — char-level GPT trained from scratch"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "numpy>=2.5.3",
     "torch>=2.14.0",
 ]
+
+[project.scripts]
+m3th = "m3th.__main__:main"
+
+[tool.setuptools]
+packages = ["m3th"]
+
+[tool.setuptools.package-data]
+m3th = ["data/*"]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"

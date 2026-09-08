@@ -88,7 +88,7 @@ def format_problem(year: int, season: str, num: int, text: str, choices: dict[st
 
 
 def main() -> None:
-    out = Path("data")
+    out = Path("m3th/data")
     out.mkdir(exist_ok=True)
     records = []
     for slug in CONTESTS:

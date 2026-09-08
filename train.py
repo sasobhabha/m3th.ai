@@ -8,7 +8,7 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 
-from model import GPT
+from m3th.model import GPT
 
 END = "<END>"  # document separator used by the scraper
 
@@ -75,7 +75,7 @@ def main() -> None:
     device = get_device()
     print(f"device: {device}")
 
-    text = Path("data/corpus.txt").read_text()
+    text = Path("m3th/data/corpus.txt").read_text()
     stoi, itos = build_vocab(text)
     data = torch.tensor(encode(text, stoi), dtype=torch.long)
     n = int(0.95 * len(data))
