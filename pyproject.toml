@@ -1,6 +1,6 @@
 [project]
 name = "m3th"
-version = "0.1.0"
+version = "0.1.1"
 description = "AMC 10-style problem generator and quiz — char-level GPT trained from scratch"
 readme = "README.md"
 requires-python = ">=3.12"
