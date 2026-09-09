@@ -17,6 +17,7 @@ GitHub release (or train your own with finetune.py).
 from __future__ import annotations
 
 import argparse
+import collections
 import os
 import random
 import re
@@ -42,15 +43,23 @@ ADAPTER_URL = (
 CHOICES_RE = re.compile(r"\((?P<letter>[A-E])\)")
 # bare LaTeX in a choice (e.g. "\frac{5}{13}") needs math delimiters to render
 LATEX_RE = re.compile(r"\\[a-zA-Z]+|\^|_\d|[{]\\")
-LETTERS = "ABCDE"
 MAX_NEW_TOKENS = 350
+SOLVE_SAMPLES = 3          # self-consistency votes
+SOLVE_MAX_NEW_TOKENS = 600
 
 SYSTEM = (
     "You write original AMC 10-style competition math problems. "
     "Output exactly one problem: a self-contained statement using LaTeX "
-    "for all math (inline \\( ... \\)), followed by five answer choices "
-    "(A) through (E) on one line. Do not solve the problem."
+    "for all math (inline \\( ... \\)). Do not include multiple choice options. Do not solve the problem."
 )
+
+SOLVE_SYSTEM = (
+    "You are an expert competition mathematician. Solve the given math "
+    "problem step by step, concisely. Provide the final numerical answer as a simple number or decimal, "
+    "on its own line, prefixed exactly with 'Answer: '."
+)
+
+FLOAT_RE = re.compile(r"-?\d+(?:\.\d+)?")
 
 # Server-side store for the problem currently on screen, keyed by a per-session
 # token (problem text is too bulky for a signed cookie).
@@ -92,7 +101,8 @@ def download_adapter() -> Path:
 
 
 class LLM:
-    """Fine-tuned Qwen 0.5B with LoRA, sampling one AMC-style problem."""
+    """Fine-tuned Qwen 0.5B with LoRA: writes problems, and — with the adapter
+    temporarily disabled — solves them. One model, two hats."""
 
     def __init__(self, adapter: Path):
         self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
@@ -100,22 +110,68 @@ class LLM:
         base = AutoModelForCausalLM.from_pretrained(BASE_MODEL)
         self.model = PeftModel.from_pretrained(base, adapter).to(self.device).eval()
 
+    def _chat(self, system: str, user: str, max_new: int, temp: float) -> str:
+        msgs = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+        prompt = self.tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
+        ids = self.tok(prompt, return_tensors="pt").to(self.device)
+        with torch.no_grad():
+            out = self.model.generate(
+                **ids, max_new_tokens=max_new, do_sample=True,
+                temperature=max(0.1, temp), top_p=0.95,
+                pad_token_id=self.tok.eos_token_id,
+            )
+        return self.tok.decode(out[0][ids["input_ids"].shape[1]:], skip_special_tokens=True)
+
     def generate(self, year: int, contest: str, number: int, temp: float,
                  seed_topic: str = "") -> str:
         difficulty = "hard" if number >= 20 else ("medium" if number >= 11 else "easy")
         user = f"Write an AMC 10 {difficulty} problem, {year} {contest} contest, problem {number}."
         if seed_topic:
             user += f" Begin it with something like: \"{seed_topic}\""
-        msgs = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}]
-        prompt = self.tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
-        ids = self.tok(prompt, return_tensors="pt").to(self.device)
-        with torch.no_grad():
-            out = self.model.generate(
-                **ids, max_new_tokens=MAX_NEW_TOKENS, do_sample=True,
-                temperature=max(0.1, temp), top_p=0.95,
-                pad_token_id=self.tok.eos_token_id,
-            )
-        return self.tok.decode(out[0][ids["input_ids"].shape[1]:], skip_special_tokens=True)
+        return self._chat(SYSTEM, user, MAX_NEW_TOKENS, temp)
+
+    def solve(self, statement: str) -> dict:
+        """The same model solves the problem it wrote, via self-consistency:
+        SOLVE_SAMPLES chain-of-thought solutions with the LoRA adapter disabled
+        (so it solves like the base instruct model, not in problem-writer mode),
+        majority vote decides the verdict."""
+        user = f"{statement}"
+        votes: list[float] = []
+        reasons: list[str] = []
+        for _ in range(SOLVE_SAMPLES):
+            with torch.no_grad():
+                # base-model headspace: disable the problem-writer LoRA weights
+                with self.model.disable_adapter():
+                    text = self._chat(SOLVE_SYSTEM, user, SOLVE_MAX_NEW_TOKENS, 0.7)
+            
+            val = None
+            # 1. Try 'Answer: '
+            m = re.findall(r"Answer:\s*(-?\d+(?:\.\d+)?)", text, re.IGNORECASE)
+            if m:
+                val = float(m[-1])
+            else:
+                # 2. Try \boxed{}
+                boxed = re.findall(r"\\boxed\{(.*?)\}", text)
+                if boxed:
+                    nums = FLOAT_RE.findall(boxed[-1])
+                    if nums:
+                        val = float(nums[-1])
+                else:
+                    # 3. Last resort, last number in text
+                    nums = FLOAT_RE.findall(text)
+                    if nums:
+                        val = float(nums[-1])
+            
+            if val is not None:
+                votes.append(val)
+            reasons.append(text.strip())
+            
+        if votes:
+            rounded_votes = [round(v) for v in votes]
+            top, n = collections.Counter(rounded_votes).most_common(1)[0]
+            return {"verdict": top, "votes": f"{n}/{len(votes)}",
+                    "reasoning": reasons}
+        return {"verdict": None, "votes": f"0/{len(votes)}", "reasoning": reasons}
 
 
 def _wrap_choice(text: str) -> str:
@@ -124,20 +180,12 @@ def _wrap_choice(text: str) -> str:
 
 
 def parse_problem(raw: str) -> dict:
-    """Split model output into statement + (A)-(E) choice list."""
+    """Split model output into statement, ignoring any generated choices."""
     raw = raw.strip()
-    # choices start at the first standalone (A) that has five letters total
-    positions: dict[str, int] = {}
-    for m in CHOICES_RE.finditer(raw):
-        positions.setdefault(m.group("letter"), m.start())
-    if len(positions) == 5 and positions["A"] > 0:
-        statement = raw[: positions["A"]].rstrip()
-        blob = raw[positions["A"]:]
-        parts = re.split(r"\(([A-E])\)", blob)  # ['', 'A', txt, 'B', txt, ...]
-        pairs = [(L, _wrap_choice(t.strip())) for L, t in zip(parts[1::2], parts[2::2])]
-        if len(pairs) == 5 and all(t for _, t in pairs):
-            return {"has_choices": True, "body": statement, "choices": pairs}
-    return {"has_choices": False, "body": raw, "choices": []}
+    match = re.search(r"\s*\([A-E]\)\s", raw)
+    if match:
+        raw = raw[:match.start()]
+    return {"body": raw.strip()}
 
 
 def create_app(adapter: Path | None = None) -> Flask:
@@ -145,9 +193,6 @@ def create_app(adapter: Path | None = None) -> Flask:
     app.secret_key = uuid.uuid4().hex  # per-process; sessions are ephemeral anyway
 
     llm = LLM(adapter or find_adapter())
-    key = answers()
-    combos = sorted(key.keys())
-    print(f"answer key: {len(combos)} slots")
 
     def score() -> dict:
         return session.setdefault("score", {"asked": 0, "correct": 0})
@@ -170,17 +215,15 @@ def create_app(adapter: Path | None = None) -> Flask:
         token = session.get("token")
         p = _PROBLEMS.get(token) if token else None
         if p is None:  # first visit: generate one now (~5-15 s)
-            (y, c, n) = random.choice(combos)
+            y, c, n = random.randint(2030, 2099), random.choice(["A", "B"]), random.randint(1, 25)
             p = _new_problem(y, c, n, 0.8, "")
         settings = session.setdefault(
-            "settings", {"year": None, "contest": "", "number": 25, "temp": 0.8, "topic": ""})
+            "settings", {"number": 25, "temp": 0.8, "topic": ""})
         return render_template("index.html", p=p, s=settings, score=score())
 
     @app.post("/next")
     def next_problem():
         form = request.form
-        year = (form.get("year") or "").strip()
-        contest = (form.get("contest") or "").strip().upper() or "A"
         number = int(form.get("number") or 25)
         number = max(1, min(25, number))
         try:
@@ -188,12 +231,11 @@ def create_app(adapter: Path | None = None) -> Flask:
         except ValueError:
             temp = 0.8
         topic = (form.get("topic") or "").strip()
-        if year:  # honor the requested year/contest/number as written
-            y, c, n = int(year), contest, number
-        else:  # random official-key slot: keeps every problem gradeable
-            y, c, n = random.choice(combos)
-        session["settings"] = {"year": year or None, "contest": contest,
-                               "number": number, "temp": temp, "topic": topic}
+        
+        # random future slot: ensures model generates a novel problem
+        y, c, n = random.randint(2030, 2099), random.choice(["A", "B"]), number
+        
+        session["settings"] = {"number": number, "temp": temp, "topic": topic}
         _new_problem(y, c, n, temp, topic)
         return redirect(url_for("index"))
 
@@ -201,13 +243,29 @@ def create_app(adapter: Path | None = None) -> Flask:
     def answer():
         token = session.get("token")
         p = _PROBLEMS.get(token) if token else None
-        letter = (request.form.get("letter") or "").strip().upper()
-        if p is None or p["answered"] or letter not in LETTERS or not p["has_choices"]:
+        
+        user_answer_str = (request.form.get("answer") or "").strip()
+        try:
+            user_val = float(user_answer_str)
+        except ValueError:
+            user_val = None
+
+        if p is None or p["answered"] or user_val is None:
             return redirect(url_for("index"))
-        correct = key.get((p["year"], p["contest"], p["number"]))
-        was = letter == correct
+        
+        # the same loaded model solves the problem it wrote (~15-40 s)
+        with _GEN_LOCK:
+            solve_result = llm.solve(p["body"])
+            p["solve"] = solve_result
+            
+        correct = solve_result["verdict"]
+        was = False
+        if correct is not None:
+            was = (round(user_val) == round(correct))
+        
         p["answered"] = True
-        p["result"] = {"yours": letter, "correct": correct, "was_correct": was}
+        p["result"] = {"yours": user_answer_str, "correct": correct, "was_correct": was}
+        
         # reassign: in-place edits of a nested dict don't flag the cookie session
         sc = score()
         session["score"] = {"asked": sc["asked"] + 1, "correct": sc["correct"] + int(was)}
